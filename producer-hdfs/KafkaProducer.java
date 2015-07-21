@@ -15,10 +15,6 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.FSDataInputStream;
 
-/* A Simple producer using API. This producer is creating log messages and sending 
- to a topic called vulab123 on a node with name vulab-build-system
- Please make sure vulab-build-system is configured in the /etc/hosts file in your unix or linux environment
- */
 
 public class KafkaProducer {
 	public static void main(String[] args) throws IOException {
@@ -29,7 +25,7 @@ public class KafkaProducer {
 		props.put("metadata.broker.list", "127.0.0.1:9092");
 		props.put("producer.type", "sync");
 		props.put("serializer.class", "kafka.serializer.StringEncoder");
-		props.put("partitioner.class", "com.vulab.kafka.training.VulabKafkaPartitioner");
+		props.put("partitioner.class", "com.amadeus.kafka.training.KafkaPartitioner");
 		props.put("request.required.acks", "1");
 
 		ProducerConfig config = new ProducerConfig(props);

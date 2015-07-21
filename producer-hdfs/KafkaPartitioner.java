@@ -8,7 +8,7 @@ import kafka.producer.Partitioner;
 import kafka.utils.VerifiableProperties;
  
 public class KafkaPartitioner implements Partitioner {
-    public VulabKafkaPartitioner (VerifiableProperties props) {
+    public KafkaPartitioner (VerifiableProperties props) {
  
     }
  
