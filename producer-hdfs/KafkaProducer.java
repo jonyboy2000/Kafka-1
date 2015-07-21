@@ -18,7 +18,6 @@ import org.apache.hadoop.fs.FSDataInputStream;
 
 public class KafkaProducer {
 	public static void main(String[] args) throws IOException {
-		long events = Long.parseLong(args[0]);
 		Random rnd = new Random();
 
 		Properties props = new Properties();
