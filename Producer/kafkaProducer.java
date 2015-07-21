@@ -5,10 +5,7 @@ import java.util.*;
 import kafka.javaapi.producer.Producer;
 import kafka.producer.KeyedMessage;
 import kafka.producer.ProducerConfig;
-/* A Simple producer using API. This producer is creating log messages and sending 
-to a topic called vulab123 on a node with name vulab-build-system
-Please make sure vulab-build-system is configured in the /etc/hosts file in your unix or linux environment
-*/
+
 
  
 public class KafkaProducer {
