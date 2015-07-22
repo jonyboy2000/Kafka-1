@@ -15,7 +15,16 @@ object StreamWC {
     val nonEmptyDatasets: DataStream[Array[String]] = datasets.map { s => s.split("\t") }.filter { !_.contains("") }
 
     val inputProRe: DataStream[LabeledVector] = inputPro(nonEmptyDatasets)
-    inputProRe.map { s => (s.position, s.label, s.feature) }.print
+
+    val histoSample: DataStream[Histogram] = inputProRe.flatMap { s =>
+      (0 until s.feature.size) map {
+        index => new Histogram(s.position, s.label, index, Array(Histo(s.feature(index), 1)))
+      }
+    }
+    val updatedSample: DataStream[Histogram] = histoSample.groupBy("position", "label", "featureIndex") reduce {
+      (h1, h2) => updatePro(h1, h2)
+    }
+    updatedSample.map { s => (s.position, s.label, s.featureIndex, s.histo.toList) }.print
 
     // execute program
     env.execute()
@@ -65,8 +74,36 @@ object StreamWC {
     val labledSample: DataStream[LabeledVector] = nonEmptySample.map { s =>
       new LabeledVector("", s(0), s.drop(1).take(13))
     }
-
     labledSample
+  }
+
+  /*
+   * update process
+   */
+  def updatePro(h1: Histogram, h2: Histogram): Histogram = {
+    var re = new Histogram(h1.position, 0, 0, null)
+    var h = (h1.histo ++ h2.histo).sortBy(_.featureValue) //accend
+
+    if (h.size <= numBins) {
+      re = new Histogram(h1.position, h1.label, h1.featureIndex, h)
+    } else {
+      while (h.size > numBins) {
+        var minIndex = 0
+        var minValue = Integer.MAX_VALUE.toDouble
+        for (i <- 0 to h.size - 2) {
+          if (h(i + 1).featureValue - h(i).featureValue < minValue) {
+            minIndex = i
+            minValue = h(i + 1).featureValue - h(i).featureValue
+          }
+        }
+        val newfrequent = h(minIndex).frequency + h(minIndex + 1).frequency
+        val newValue = (h(minIndex).featureValue * h(minIndex).frequency + h(minIndex + 1).featureValue * h(minIndex + 1).frequency) / newfrequent
+        val newFea = h.take(minIndex) ++ Array(Histo(newValue, newfrequent)) ++ h.drop(minIndex + 2)
+        h = newFea
+      }
+      re = new Histogram(h1.position, h1.label, h1.featureIndex, h)
+    }
+    re
   }
 
 }
