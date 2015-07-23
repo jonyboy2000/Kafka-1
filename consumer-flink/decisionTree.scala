@@ -5,6 +5,9 @@ import org.apache.flink.streaming.connectors.kafka.api.KafkaSource
 import org.apache.flink.streaming.connectors.kafka.api.KafkaSink
 import org.apache.flink.streaming.util.serialization._
 import math._
+import java.util.concurrent.TimeUnit._
+import java.util.concurrent.TimeUnit;
+import org.apache.flink.streaming.api.windowing.helper.Time
 
 object StreamWC {
 
@@ -34,7 +37,10 @@ object StreamWC {
     val numSample: DataStream[NumSample] = labledSample.map { s => new NumSample(s.position, 1) }.groupBy(0)
       .reduce { (s1, s2) => new NumSample(s1.position, s1.number + s2.number) }
 
-    mergedSample.map { s => (s.position, s.featureIndex, s.histo.toList) }.print
+	// numSample update every 5 sec
+    val res = numSample.join(mergedSample).onWindow(5, TimeUnit.SECONDS).where("position").equalTo("position")
+
+    res.print
 
     // execute program
     env.execute()
