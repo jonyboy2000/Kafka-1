@@ -6,7 +6,7 @@ import org.apache.flink.streaming.connectors.kafka.api.KafkaSink
 import org.apache.flink.streaming.util.serialization._
 import math._
 import java.util.concurrent.TimeUnit._
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeUnit
 import org.apache.flink.streaming.api.windowing.helper.Time
 
 object StreamWC {
