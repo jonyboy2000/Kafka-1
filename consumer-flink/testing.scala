@@ -1,45 +1,66 @@
 package org.myorg.quickstart
 
+import org.apache.flink.util.Collector
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.connectors.kafka.api.KafkaSource
 import org.apache.flink.streaming.connectors.kafka.api.KafkaSink
 import org.apache.flink.streaming.util.serialization._
 import math._
+import java.util.concurrent.TimeUnit._
+import java.util.concurrent.TimeUnit
+import org.apache.flink.streaming.api.windowing.helper.Time
 
-import org.apache.flink.util.Collector
-
-object StreamWC {
+object WordCount {
 
   def main(args: Array[String]) {
 
+    if (!parseParameters(args)) {
+      return
+    }
+
+    // get execution environment
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     val stream: DataStream[String] = env.addSource(new KafkaSource[String]("ovhbhshad3:2181", "vulab123", new SimpleStringSchema))
     val datasets: DataStream[String] = stream.flatMap { _.split("\n") } filter { _.nonEmpty }
     val nonEmptyDatasets: DataStream[Array[String]] = datasets.map { s => s.split("\t") }.filter { !_.contains("") }
 
     val labledSample: DataStream[LabeledVector] = inputPro(nonEmptyDatasets)
+    //labledSample.map { s => (s.position, s.label, s.feature.toList) }.writeAsText("/home/hadoop/Desktop/test/labledSample")
+    val totalNum = labledSample.map { s => 1 }.reduce { _ + _ }
 
-    val histoSample: DataStream[Histogram] = labledSample.flatMap { s =>
-      (0 until s.feature.size) map {
-        index => new Histogram(s.position, s.label, index, Array(Histo(s.feature(index), 1)))
-      }
+    val splitedSample: DataStream[LabeledVector] = labledSample.iterate(numLevel) { iterationInput: DataStream[LabeledVector] =>
+      val result = partition(iterationInput)._1
+      result
     }
-    val updatedSample: DataStream[Histogram] = histoSample.groupBy("position", "label", "featureIndex") reduce {
-      (h1, h2) => updatePro(h1, h2)
+    splitedSample.map { s => (s.position, s.label, s.feature.toList) }.writeAsText("/home/hadoop/Desktop/test/data")
+
+    val splitPlace: DataStream[Frequency] = splitedSample.map { s => new Frequency(s.position, s.label, 1) }.groupBy("position", "label").sum("frequency")
+    splitPlace.writeAsText("/home/hadoop/Desktop/test/splitPlace")
+
+    val terminalNodeNum: DataStream[Int] = splitPlace.groupBy("position").reduce {
+      (s1, s2) => new Frequency(s1.position, s1.label, 1)
+    }.map { s => 1 }.reduce(_ + _)
+    terminalNodeNum.writeAsText("/home/hadoop/Desktop/test/terminalNodeNum")
+
+    val residualMeanDeviancePre: DataStream[Frequency] = splitPlace.groupBy("position").reduce {
+      (s1, s2) => new Frequency(s1.position, s1.label, s1.frequency + s2.frequency)
     }
 
-    val mergedSample: DataStream[MergedHisto] = updatedSample.map { s => new MergedHisto(s.position, s.featureIndex, s.histo) }
-      .groupBy("position", "featureIndex") reduce {
-        (m1, m2) => mergePro(m1, m2)
-      }
+    val residualMeanDeviance: DataStream[Double] = splitPlace.join(residualMeanDeviancePre).where("position").equalTo("position") {
+      (s1, s2, out: Collector[Frequency]) =>
+        out.collect(new Frequency(s1.position, s1.label, -2 * s1.frequency * log(s1.frequency / s2.frequency)))
+    }.reduce {
+      (s1, s2) => new Frequency(s1.position, 0, s1.frequency + s2.frequency)
+    }.cross(totalNum).cross(terminalNodeNum).map {
+      s => s._1._1.frequency / (s._1._2 - s._2)
+    }
+    residualMeanDeviance.writeAsText("/home/hadoop/Desktop/test/residualMeanDeviance")
 
-    val numSample: DataStream[NumSample] = labledSample.map { s => new NumSample(s.position, 1) }.groupBy(0)
-      .reduce { (s1, s2) => new NumSample(s1.position, s1.number + s2.number) }
-
-    mergedSample.map { s => (s.position, s.featureIndex, s.histo.toList) }.print
+    val testErr = testErrCal(splitedSample, totalNum)
+    testErr.writeAsText("/home/hadoop/Desktop/test/testErr")
 
     // execute program
-    env.execute()
+    env.execute(" Decision Tree ")
   }
 
   // *************************************************************************
@@ -47,8 +68,8 @@ object StreamWC {
   // *************************************************************************  
   private var inputPath: String = null
   private var outputPath: String = null
-  private val numBins = 5 // B bins for Update procedure
-  private val numSplit = 5 //By default it should be same as numBins
+  private val numBins = 20 // B bins for Update procedure
+  private val numSplit = 20 //By default it should be same as numBins
   private val numLevel = 1 // how many levels of tree
 
   case class LabeledVector(position: String, label: Double, feature: Array[Double])
@@ -65,6 +86,20 @@ object StreamWC {
   //  UTIL METHODS
   // *************************************************************************
 
+  private def parseParameters(args: Array[String]): Boolean = {
+    println(" start parse")
+    if (args.length == 2) {
+
+      inputPath = args(0)
+      outputPath = args(1)
+      println(" stop parse")
+      true
+    } else {
+      System.err.println("Please set input/output path. \n")
+      false
+    }
+  }
+
   /*
    * input data process
    */
@@ -72,6 +107,7 @@ object StreamWC {
 
     val nonEmptySample: DataStream[Array[Double]] = nonEmptyDatasets.map { s => s.take(14)
     }.map { s =>
+      //var re = new Array[Double](3)
       var re = new Array[Double](14)
       var i = 0
 
@@ -86,6 +122,7 @@ object StreamWC {
     val labledSample: DataStream[LabeledVector] = nonEmptySample.map { s =>
       new LabeledVector("", s(0), s.drop(1).take(13))
     }
+
     labledSample
   }
 
@@ -456,4 +493,33 @@ object StreamWC {
     (splitedSample, splitPlace)
   }
 
+  /*
+     * test error to measure the algorithm accuracy
+     */
+  def testErrCal(inputTo: DataStream[LabeledVector], totalNum: DataStream[Int]): DataStream[Double] = {
+    val real = inputTo.map { s => new Frequency(s.position, s.label, 1) }
+      .groupBy("position", "label").reduce { (s1, s2) => new Frequency(s1.position, s1.label, s1.frequency + s2.frequency) }
+    // real.writeAsText("/home/hadoop/Desktop/test/real")
+
+    val prediction = real.groupBy("position").reduce { (s1, s2) =>
+      var re = new Frequency(s1.position, s1.label, 0)
+      if (s1.frequency > s2.frequency)
+        re = new Frequency(s1.position, s1.label, s1.frequency + s2.frequency)
+      else
+        re = new Frequency(s1.position, s2.label, s1.frequency + s2.frequency)
+      re
+    }
+    //prediction.writeAsText("/home/hadoop/Desktop/test/prediction")
+
+    val testErrs = real.join(prediction).where("position").equalTo("position") {
+      (real, prediction, out: Collector[Double]) =>
+        var count = 0.0
+        if (real.label != prediction.label)
+          count += real.frequency
+        out.collect(count)
+    }.reduce { _ + _ }
+
+    val testErr = testErrs.cross(totalNum).map { s => s._1 / s._2 }
+    testErr
+  }
 }
